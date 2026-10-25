@@ -1,6 +1,6 @@
 //! TLS presentation language (RFC 9846) vector types
 
-use crate::mtc::{ParseError, TlsParse};
+use crate::mtc::cert_format::tls_parsing::{ParseError, TlsParse};
 use alloc::vec::Vec;
 
 fn parse_vec_size_field<const MIN_LENGTH: usize, const MAX_LENGTH: usize>(
@@ -65,7 +65,7 @@ where
 {
     fn parse(reader: &mut untrusted::Reader<'a>) -> Result<Self, ParseError> {
         let size: usize = parse_vec_size_field::<MIN_LENGTH, MAX_LENGTH>(reader)?;
-        
+
         let raw_data = reader.read_bytes(size)?;
         let data = raw_data.read_all(ParseError::IncompleteRead, |reader| {
             let mut data = Vec::new();
@@ -82,7 +82,7 @@ where
 #[cfg(test)]
 mod test {
     use super::OpaqueVec;
-    use crate::mtc::{ParseError, TlsParse};
+    use crate::mtc::cert_format::tls_parsing::{ParseError, TlsParse};
     use alloc::vec::Vec;
     use std::assert_matches;
 

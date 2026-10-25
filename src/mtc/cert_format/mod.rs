@@ -1,10 +1,13 @@
 //! Types and helpers for the format of "regular" MTC certificates - section 6.2
 
-use crate::mtc::tls_vec::{OpaqueVec, TlsVec};
-use crate::mtc::{ParseError, TlsParse};
+use tls_parsing::{ParseError, TlsParse};
+use tls_vec::{OpaqueVec, TlsVec};
+
+pub(in crate::mtc) mod tls_parsing;
+mod tls_vec;
 
 /// OID of the MTC signature algorithm
-pub(in crate::mtc) static OID_SIGNATURE_ALGORITHM: [u8; 8] = oid!(1, 3, 6, 1, 5, 5, 7, 6, 67);
+pub(crate) static OID_SIGNATURE_ALGORITHM: [u8; 8] = oid!(1, 3, 6, 1, 5, 5, 7, 6, 67);
 
 // constant sizes
 const TRUST_ANCHOR_ID_MAX_LENGTH: usize = 255;
@@ -120,7 +123,7 @@ impl<'a> TlsParse<'a> for MtcProof<'a> {
 mod test {
     use crate::der::Tag;
     use crate::mtc::cert_format::MtcProof;
-    use crate::mtc::{ParseError, TlsParse};
+    use crate::mtc::cert_format::tls_parsing::{ParseError, TlsParse};
     use crate::{Cert, der};
 
     #[test]

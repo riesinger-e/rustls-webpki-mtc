@@ -1,35 +1,37 @@
 //! Types and helpers for the format of MTC CA certificates, section 5.5
 
+use crate::Error;
 use crate::der;
-use crate::mtc::ParseError;
 
+/// extract the CA ID (= cosigner ID) from the CA subject
 pub(crate) fn mtc_ca_subject_extract_cosigner_id(
     subject: untrusted::Input<'_>,
-) -> Result<untrusted::Input<'_>, ParseError> {
+) -> Result<untrusted::Input<'_>, Error> {
     /// Identifies a subject containing a CA (cosigner) ID
     static MTC_CA_OID: [u8; 8] = oid!(1, 3, 6, 1, 5, 5, 7, 25, 3);
 
     // parse the subject as a PKIX distinguished Name (section 5.1)
-    let (oid, cosigner_id) = subject
-        .read_all(crate::Error::BadDer, |reader| {
-            der::nested(reader, der::Tag::Set, crate::Error::BadDer, |reader| {
-                der::nested(reader, der::Tag::Sequence, crate::Error::BadDer, |reader| {
-                    let oid = der::expect_tag(reader, der::Tag::OID)?;
-                    let cosigner_id = der::expect_tag(reader, der::Tag::RelativeOID)?;
+    let (oid, cosigner_id) = subject.read_all(Error::BadDer, |reader| {
+        der::nested(reader, der::Tag::Set, Error::BadDer, |reader| {
+            der::nested(reader, der::Tag::Sequence, Error::BadDer, |reader| {
+                let oid = der::expect_tag(reader, der::Tag::OID)?;
+                let cosigner_id = der::expect_tag(reader, der::Tag::RelativeOID)?;
 
-                    Ok((oid, cosigner_id))
-                })
+                Ok((oid, cosigner_id))
             })
         })
-        .map_err(|_| ParseError::MalformedCa)?;
+    })?;
 
     if oid.as_slice_less_safe() != MTC_CA_OID.as_slice() {
         // wrong attribute type
-        return Err(ParseError::MalformedCa);
+        return Err(Error::MalformedMtcCaId);
     }
 
     Ok(cosigner_id)
 }
+
+/// Identifier of the extension for SHA256 MTC CAs
+pub(crate) static EXT_CA_SHA256_OID: [u8; 8] = oid!(1, 3, 6, 1, 5, 5, 7, 1, 38);
 
 #[cfg(test)]
 mod tests {

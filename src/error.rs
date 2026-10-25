@@ -129,6 +129,11 @@ pub enum Error {
     /// invalid labels.
     MalformedNameConstraint,
 
+    #[cfg(feature = "mtc")]
+    /// Expected the subject field of an MTC CA cert or the issuer field of an MTC Cert to contain an
+    /// MTC CA ID (= a PKIX DN with 1 specific attribute), but found an invalid format.
+    MalformedMtcCaId,
+
     /// The maximum number of name constraint comparisons has been reached.
     MaximumNameConstraintComparisonsExceeded,
 
@@ -336,6 +341,9 @@ impl Error {
             Self::UnsupportedRevocationReasonsPartitioning => 80,
             Self::UnsupportedCrlIssuingDistributionPoint => 70,
             Self::MaximumPathDepthExceeded => 61,
+
+            #[cfg(feature = "mtc")]
+            Self::MalformedMtcCaId => 63,
 
             // Errors related to malformed data.
             Self::MalformedDnsIdentifier => 60,
