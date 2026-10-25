@@ -1,4 +1,4 @@
-#![cfg(feature = "alloc")]
+#![cfg(feature = "mtc")]
 
 use core::error::Error;
 use core::fmt::Display;
@@ -15,6 +15,7 @@ enum ParseError {
     EndOfInput,
     InvalidVectorSize { min: usize, max: usize, is: usize },
     IncompleteRead,
+    MalformedCa,
 }
 
 impl Display for ParseError {
@@ -26,6 +27,7 @@ impl Display for ParseError {
                 "invalid TLS vector size. Expected {min} <= size <= {max}, is: {is}"
             ),
             Self::IncompleteRead => write!(f, "incomplete read, left over bytes"),
+            Self::MalformedCa => write!(f, "Certificate does not seem to be an MTC CA certificate"),
         }
     }
 }

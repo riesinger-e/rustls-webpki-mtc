@@ -65,7 +65,9 @@ pub(crate) enum Tag {
     OctetString = 0x04,
     OID = 0x06,
     Enum = 0x0A,
+    RelativeOID = 0x0D,
     Sequence = CONSTRUCTED | 0x10, // 0x30
+    Set = CONSTRUCTED | 0x11,      // 0x31
     UTCTime = 0x17,
     GeneralizedTime = 0x18,
 
