@@ -2,13 +2,12 @@
 
 use crate::der;
 use crate::mtc::ParseError;
-use der_parser::Oid;
 
 pub(crate) fn mtc_ca_subject_extract_cosigner_id(
     subject: untrusted::Input<'_>,
 ) -> Result<untrusted::Input<'_>, ParseError> {
     /// Identifies a subject containing a CA (cosigner) ID
-    static MTC_CA_OID: Oid<'static> = der_parser::oid!(1.3.6.1.5.5.7.25.3);
+    static MTC_CA_OID: [u8; 8] = oid!(1, 3, 6, 1, 5, 5, 7, 25, 3);
 
     // parse the subject as a PKIX distinguished Name (section 5.1)
     let (oid, cosigner_id) = subject
@@ -24,7 +23,7 @@ pub(crate) fn mtc_ca_subject_extract_cosigner_id(
         })
         .map_err(|_| ParseError::MalformedCa)?;
 
-    if oid.as_slice_less_safe() != MTC_CA_OID.as_bytes() {
+    if oid.as_slice_less_safe() != MTC_CA_OID.as_slice() {
         // wrong attribute type
         return Err(ParseError::MalformedCa);
     }
@@ -55,7 +54,7 @@ mod tests {
             super::mtc_ca_subject_extract_cosigner_id(cert.subject)
                 .unwrap()
                 .as_slice_less_safe(),
-            der_parser::oid!(rel 32473.1).as_bytes()
+            x509_parser::asn1_rs::oid!(rel 32473.1).as_bytes()
         );
     }
 }

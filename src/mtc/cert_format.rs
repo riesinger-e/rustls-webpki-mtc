@@ -2,11 +2,9 @@
 
 use crate::mtc::tls_vec::{OpaqueVec, TlsVec};
 use crate::mtc::{ParseError, TlsParse};
-use der_parser::Oid;
 
 /// OID of the MTC signature algorithm
-pub(in crate::mtc) static OID_SIGNATURE_ALGORITHM: Oid<'static> =
-    der_parser::oid!(1.3.6.1.5.5.7.6.67);
+pub(in crate::mtc) static OID_SIGNATURE_ALGORITHM: [u8; 8] = oid!(1, 3, 6, 1, 5, 5, 7, 6, 67);
 
 // constant sizes
 const TRUST_ANCHOR_ID_MAX_LENGTH: usize = 255;
@@ -120,36 +118,51 @@ impl<'a> TlsParse<'a> for MtcProof<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::Cert;
+    use crate::der::Tag;
     use crate::mtc::cert_format::MtcProof;
     use crate::mtc::{ParseError, TlsParse};
+    use crate::{Cert, der};
 
     #[test]
     fn parse_signature() {
         // generated with the official MTC RFC demo, cert_10_3.pem
         //   ./demo generate
         //   openssl x509 -outform der -in cert_10_3.pem -out cert-standalone-simple.der
-        let cert_der = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/mtc/cert-standalone-simple.der"));
+        let cert_der = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/mtc/cert-standalone-simple.der"
+        ));
         let cert = Cert::from_der(untrusted::Input::from(cert_der)).unwrap();
 
         // test correct basic parsing
         assert_eq!(cert.serial(), &0x100000000000a_u64.to_be_bytes()[1..]);
 
         // test signature algorithm parsing
-        let signature_algorithm = cert.signed_data.algorithm.as_slice_less_safe();
-        let signature_algorithm = der_parser::parse_der(signature_algorithm).unwrap();
-        let signature_algorithm = signature_algorithm.1.as_oid().unwrap();
-        assert_eq!(signature_algorithm.as_bytes(), super::OID_SIGNATURE_ALGORITHM.as_bytes());
+        let signature_algorithm = cert.signed_data.algorithm;
+        let signature_algorithm = signature_algorithm
+            .read_all(crate::Error::BadDer, |reader| {
+                der::expect_tag(reader, Tag::OID)
+            })
+            .unwrap();
+        assert_eq!(
+            signature_algorithm.as_slice_less_safe(),
+            super::OID_SIGNATURE_ALGORITHM.as_slice()
+        );
 
         // parse signature
         let signature = cert.signed_data.signature;
-        let proof = signature.read_all(ParseError::IncompleteRead, MtcProof::parse).unwrap();
+        let proof = signature
+            .read_all(ParseError::IncompleteRead, MtcProof::parse)
+            .unwrap();
         assert!(proof.extensions.0.is_empty());
         assert_eq!(proof.start, 8);
         assert_eq!(proof.end, 11);
         let signatures = proof.signatures.0;
         assert_eq!(signatures.len(), 1);
         let signature = &signatures[0];
-        assert_eq!(signature.cosigner_id.0.as_slice_less_safe(), der_parser::oid!(rel 32473.1).as_bytes());
+        assert_eq!(
+            signature.cosigner_id.0.as_slice_less_safe(),
+            x509_parser::asn1_rs::oid!(rel 32473.1).as_bytes()
+        );
     }
 }

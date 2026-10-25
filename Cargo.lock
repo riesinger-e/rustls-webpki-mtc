@@ -547,7 +547,6 @@ dependencies = [
  "base64",
  "bencher",
  "bzip2",
- "der-parser",
  "once_cell",
  "rcgen",
  "ring",

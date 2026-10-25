@@ -80,7 +80,6 @@ mtc = ["alloc"]
 
 [dependencies]
 aws-lc-rs = { version = "1.18", optional = true, default-features = false }
-der-parser = { version = "10.0.0", default-features = false }
 pki-types = { package = "rustls-pki-types", version = "1.12", default-features = false }
 ring = { version = "0.17", default-features = false, optional = true }
 untrusted = "0.9"
