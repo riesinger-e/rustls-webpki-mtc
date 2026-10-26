@@ -9,7 +9,7 @@ pub(in crate::mtc) enum ParseError {
     EndOfInput,
     InvalidVectorSize { min: usize, max: usize, is: usize },
     IncompleteRead,
-    MalformedCa,
+    UnorderedCosignatures,
 }
 
 impl Display for ParseError {
@@ -21,7 +21,7 @@ impl Display for ParseError {
                 "invalid TLS vector size. Expected {min} <= size <= {max}, is: {is}"
             ),
             Self::IncompleteRead => write!(f, "incomplete read, left over bytes"),
-            Self::MalformedCa => write!(f, "Certificate does not seem to be an MTC CA certificate"),
+            Self::UnorderedCosignatures => write!(f, "The MTC cosignatures are not ordered"),
         }
     }
 }

@@ -38,6 +38,33 @@ impl<'a> TlsParse<'a> for Cosignature<'a> {
     }
 }
 
+
+// for comparisons
+impl PartialEq for Cosignature<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        PartialEq::eq(
+            &self.cosigner_id.0.as_slice_less_safe(),
+            &other.cosigner_id.0.as_slice_less_safe(),
+        )
+    }
+}
+
+impl PartialOrd for Cosignature<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        let slice1 = self.cosigner_id.0.as_slice_less_safe();
+        let slice2 = other.cosigner_id.0.as_slice_less_safe();
+
+        // compare length first
+        match slice1.len().cmp(&slice2.len()) {
+            // equal length: "Byte strings of the same length are ordered lexicographically"
+            // --> rust slice comparisons are lexicographic
+            core::cmp::Ordering::Equal => Some(slice1.cmp(slice2)),
+            // longer or shorter --> simple
+            ord => Some(ord),
+        }
+    }
+}
+
 /// Enum with unknown values / section 5.2.1
 #[repr(transparent)]
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
@@ -108,7 +135,13 @@ impl<'a> TlsParse<'a> for MtcProof<'a> {
         let start = parse_u48(reader)?;
         let end = parse_u48(reader)?;
         let inclusion_proof = OpaqueVec::parse(reader)?;
-        let signatures = TlsVec::parse(reader)?;
+
+        let signatures = TlsVec::<_, _, Cosignature<'a>>::parse(reader)?;
+        // verify signature sort order
+        if !signatures.0.is_sorted() {
+            return Err(ParseError::UnorderedCosignatures)
+        }
+
         Ok(Self {
             extensions,
             start,
