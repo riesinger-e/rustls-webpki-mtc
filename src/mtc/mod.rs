@@ -1,6 +1,8 @@
-#![cfg(feature = "mtc")]
+//! Support for [Merkle Tree Certificates v7](https://datatracker.ietf.org/doc/draft-ietf-plants-merkle-tree-certs/)
 
-mod cert_format;
 mod ca;
+mod cert_format;
 
 pub(crate) use ca::*;
+
+pub use ca::{CosignerPolicy, Cosigner, TrustedSubtree, Hash};

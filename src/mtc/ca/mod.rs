@@ -1,10 +1,87 @@
 mod format;
 
 use crate::x509::set_extension_once;
+pub(in crate::mtc) use format::HashAlgorithm;
+use pki_types::AlgorithmIdentifier;
 use std::prelude::rust_2015::Vec;
 use std::range::RangeInclusive;
 
-pub(in crate::mtc) use format::HashAlgorithm;
+/// Policy on handling cosignatures
+#[derive(Debug, Default)]
+pub enum CosignerPolicy {
+    /// Only a cosignature by the CA is required
+    #[default]
+    CaOnly,
+    /// A cosignature by all given Cosigners is required
+    All,
+}
+
+/// Information about a cosigner
+#[derive(Debug)]
+pub struct Cosigner<'a> {
+    pub(in crate::mtc) id: untrusted::Input<'a>,
+    pub(in crate::mtc) signature_algorithm: AlgorithmIdentifier,
+    public_key: untrusted::Input<'a>,
+}
+
+impl<'a> Cosigner<'a> {
+    /// Create a new cosigner
+    /// - cosigner_id: cosigner relative OID, already in binary DER format (without header/length).
+    ///   The format is not verified.
+    /// - signature_algorithm for the cosignature
+    /// - public_key
+    pub fn new(
+        cosigner_id: untrusted::Input<'a>,
+        signature_algorithm: AlgorithmIdentifier,
+        public_key: untrusted::Input<'a>,
+    ) -> Self {
+        Self {
+            id: cosigner_id,
+            signature_algorithm,
+            public_key,
+        }
+    }
+
+    pub(in crate::mtc) fn signature_algorithm(&self) -> &[u8] {
+        self.signature_algorithm.as_ref()
+    }
+}
+
+/// Specify the hash of a trusted subtree for MTCs
+#[derive(Debug)]
+pub enum Hash {
+    /// Sha256 hash value
+    Sha256([u8; 32]),
+}
+
+/// A trusted subtree used for MTC landmark certificates.
+/// It's the caller's responsibility to check that the subtree is valid and observed by an appropriate number of cosigners.
+#[derive(Debug)]
+pub struct TrustedSubtree {
+    pub(in crate::mtc) log_number: u16,
+    pub(in crate::mtc) hash: Hash,
+    pub(in crate::mtc) start: u64,
+    pub(in crate::mtc) end: u64,
+}
+
+impl TrustedSubtree {
+    /// Create new instance.
+    /// `start` and `end` may be a maximum of 48 bits --> enforced via `Option`.
+    pub fn new(log_number: u16, hash: Hash, start: u64, end: u64) -> Option<Self> {
+        const MAX_INDEX: u64 = (1 << 48) - 1;
+
+        if start > MAX_INDEX || end > MAX_INDEX {
+            None
+        } else {
+            Some(Self {
+                log_number,
+                hash,
+                start,
+                end,
+            })
+        }
+    }
+}
 
 /// Information about an MTC CA
 #[derive(Debug)]
@@ -14,7 +91,9 @@ pub(crate) struct MtcCa<'a> {
     pub(crate) ca_id: untrusted::Input<'a>,
     pub(crate) signature_algorithm: untrusted::Input<'a>,
     pub(crate) revoked_ranges: Vec<RangeInclusive<u64>>,
-    //TODO: cosigner policy, trusted subtrees (-> landmark-relative certs), additional cosigners
+    pub(crate) cosigner_policy: CosignerPolicy,
+    pub(crate) additional_cosigners: Vec<Cosigner<'a>>,
+    pub(crate) trusted_subtrees: Vec<TrustedSubtree>,
 }
 
 /// Remember the extension if it is an MTC extension.
@@ -48,6 +127,9 @@ pub(crate) fn remember_mtc_extension<'a>(
                 RangeInclusive::from(0..=(extension.min_serial - 1)),
                 RangeInclusive::from((extension.max_serial + 1)..=u64::MAX),
             ],
+            cosigner_policy: CosignerPolicy::default(),
+            additional_cosigners: Vec::new(),
+            trusted_subtrees: Vec::new(),
         })
     })?;
 
@@ -89,16 +171,22 @@ mod test {
                     mtc.revoked_ranges[0],
                     RangeInclusive::from(0..=((1 << 48) - 1))
                 );
-                assert_eq!(mtc.revoked_ranges[1], RangeInclusive::from(((5 << 48) + 281474976710655 + 1)..=u64::MAX));
+                assert_eq!(
+                    mtc.revoked_ranges[1],
+                    RangeInclusive::from(((5 << 48) + 281474976710655 + 1)..=u64::MAX)
+                );
             }
             None => panic!("{} is None", stringify!(cert.mtc_ca)),
         }
     }
-    
+
     // check that a CA cert that is not an MTC is also still parsed correctly
     #[test]
     fn test_ca_cert_parsing_non_mtc() {
-        let cert_der = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/amazon/AmazonRootCA1.cer"));
+        let cert_der = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/amazon/AmazonRootCA1.cer"
+        ));
         let cert = Cert::from_der(untrusted::Input::from(cert_der)).unwrap();
         assert!(cert.mtc_ca.is_none());
     }
