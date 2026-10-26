@@ -18,6 +18,8 @@ use pki_types::{CertificateDer, DnsName};
 
 use crate::der::{self, CONSTRUCTED, CONTEXT_SPECIFIC, DerIterator, FromDer, Tag};
 use crate::error::{DerTypeId, Error};
+#[cfg(feature = "mtc")]
+use crate::mtc::{MtcCa, remember_mtc_extension};
 use crate::public_values_eq;
 use crate::signed_data::SignedData;
 use crate::subject_name::{GeneralName, NameIterator, WildcardDnsNameRef};
@@ -45,6 +47,9 @@ pub struct Cert<'a> {
     pub(crate) name_constraints: Option<untrusted::Input<'a>>,
     pub(crate) subject_alt_name: Option<untrusted::Input<'a>>,
     pub(crate) crl_distribution_points: Option<untrusted::Input<'a>>,
+
+    #[cfg(feature = "mtc")]
+    pub(crate) mtc_ca: Option<MtcCa<'a>>,
 
     der: CertificateDer<'a>,
 }
@@ -114,6 +119,8 @@ impl<'a> Cert<'a> {
                     name_constraints: None,
                     subject_alt_name: None,
                     crl_distribution_points: None,
+                    #[cfg(feature = "mtc")]
+                    mtc_ca: None,
 
                     der: CertificateDer::from(cert_der.as_slice_less_safe()),
                 };
@@ -292,6 +299,13 @@ fn remember_cert_extension<'a>(
     extension: &Extension<'a>,
     ext_policy: UnknownExtensionPolicy,
 ) -> Result<(), Error> {
+    // check for MTC extension
+    #[cfg(feature = "mtc")]
+    if remember_mtc_extension(cert, extension)? {
+        // early return if this function handled the value
+        return Ok(());
+    }
+
     // We don't do anything with certificate policies so we can safely ignore
     // all policy-related stuff. We assume that the policy-related extensions
     // are not marked critical.
