@@ -32,24 +32,6 @@ pub(in crate::mtc) fn subject_extract_cosigner_id(
     Ok(cosigner_id)
 }
 
-/// MTC hash algorithm, specified by the CA extension
-#[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Debug)]
-pub(crate) enum HashAlgorithm {
-    // only MTC hash algorithm currently specified
-    Sha256,
-}
-
-impl HashAlgorithm {
-    /// Return the OID of the corresponding extension
-    pub(in crate::mtc) const fn extension_oid(self) -> &'static [u8] {
-        static EXT_CA_SHA256_OID: [u8; 8] = oid!(1, 3, 6, 1, 5, 5, 7, 1, 38);
-
-        match self {
-            Self::Sha256 => &EXT_CA_SHA256_OID,
-        }
-    }
-}
-
 // min and max values for the serial in Extension
 const MIN_SERIAL: u64 = 281474976710656;
 const MAX_SERIAL: u64 = 18446744073709551615;

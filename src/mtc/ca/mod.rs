@@ -1,100 +1,10 @@
 mod format;
 
 use crate::x509::set_extension_once;
-pub(in crate::mtc) use format::HashAlgorithm;
-use pki_types::AlgorithmIdentifier;
+use alloc::borrow::Cow;
+use pki_types::mtc::{CosignerPolicy, HashAlgorithm, MtcCa};
 use std::prelude::rust_2015::Vec;
 use std::range::RangeInclusive;
-
-/// Policy on handling cosignatures
-#[derive(Debug, Default)]
-pub enum CosignerPolicy {
-    /// Only a cosignature by the CA is required
-    #[default]
-    CaOnly,
-    /// A cosignature by all given Cosigners is required
-    All,
-}
-
-/// Information about a cosigner
-#[derive(Debug)]
-pub struct Cosigner<'a> {
-    pub(in crate::mtc) id: untrusted::Input<'a>,
-    pub(in crate::mtc) signature_algorithm: AlgorithmIdentifier,
-    public_key: untrusted::Input<'a>,
-}
-
-impl<'a> Cosigner<'a> {
-    /// Create a new cosigner
-    /// - cosigner_id: cosigner relative OID, already in binary DER format (without header/length).
-    ///   The format is not verified.
-    /// - signature_algorithm for the cosignature
-    /// - public_key
-    pub fn new(
-        cosigner_id: untrusted::Input<'a>,
-        signature_algorithm: AlgorithmIdentifier,
-        public_key: untrusted::Input<'a>,
-    ) -> Self {
-        Self {
-            id: cosigner_id,
-            signature_algorithm,
-            public_key,
-        }
-    }
-
-    pub(in crate::mtc) fn signature_algorithm(&self) -> &[u8] {
-        self.signature_algorithm.as_ref()
-    }
-}
-
-/// Specify the hash of a trusted subtree for MTCs
-#[derive(Debug)]
-pub enum Hash {
-    /// Sha256 hash value
-    Sha256([u8; 32]),
-}
-
-/// A trusted subtree used for MTC landmark certificates.
-/// It's the caller's responsibility to check that the subtree is valid and observed by an appropriate number of cosigners.
-#[derive(Debug)]
-pub struct TrustedSubtree {
-    pub(in crate::mtc) log_number: u16,
-    pub(in crate::mtc) hash: Hash,
-    pub(in crate::mtc) start: u64,
-    pub(in crate::mtc) end: u64,
-}
-
-impl TrustedSubtree {
-    /// Create new instance.
-    /// `start` and `end` may be a maximum of 48 bits --> enforced via `Option`.
-    pub fn new(log_number: u16, hash: Hash, start: u64, end: u64) -> Option<Self> {
-        const MAX_INDEX: u64 = (1 << 48) - 1;
-
-        if start > MAX_INDEX || end > MAX_INDEX {
-            None
-        } else {
-            Some(Self {
-                log_number,
-                hash,
-                start,
-                end,
-            })
-        }
-    }
-}
-
-/// Information about an MTC CA
-#[derive(Debug)]
-#[non_exhaustive]
-pub(crate) struct MtcCa<'a> {
-    pub(crate) hash_algorithm: HashAlgorithm,
-    pub(crate) ca_id: untrusted::Input<'a>,
-    pub(crate) signature_algorithm: untrusted::Input<'a>,
-    pub(crate) revoked_ranges: Vec<RangeInclusive<u64>>,
-    pub(crate) cosigner_policy: CosignerPolicy,
-    pub(crate) additional_cosigners: Vec<Cosigner<'a>>,
-    pub(crate) trusted_subtrees: Vec<TrustedSubtree>,
-}
 
 /// Remember the extension if it is an MTC extension.
 /// Returns Ok(true) if the given extension is handled, else Ok(false).
@@ -121,8 +31,8 @@ pub(crate) fn remember_mtc_extension<'a>(
 
         Ok(MtcCa {
             hash_algorithm,
-            ca_id,
-            signature_algorithm: extension.algorithm_identifier,
+            ca_id: Cow::Borrowed(ca_id.as_slice_less_safe()),
+            signature_algorithm: Cow::Borrowed(extension.algorithm_identifier.as_slice_less_safe()),
             revoked_ranges: alloc::vec![
                 RangeInclusive::from(0..=(extension.min_serial - 1)),
                 RangeInclusive::from((extension.max_serial + 1)..=u64::MAX),
@@ -142,7 +52,7 @@ mod test {
     use crate::mtc::ca::HashAlgorithm;
     use std::range::RangeInclusive;
 
-    // check that a MTC CA cert is parsed correctly
+    // check that an MTC CA cert is parsed correctly
     #[test]
     fn test_ca_cert_parsing() {
         // generated with the official MTC RFC demo, cert_10_3.pem
@@ -159,11 +69,11 @@ mod test {
             Some(mtc) => {
                 assert_eq!(mtc.hash_algorithm, HashAlgorithm::Sha256);
                 assert_eq!(
-                    mtc.ca_id.as_slice_less_safe(),
+                    mtc.ca_id.as_ref(),
                     x509_parser::asn1_rs::oid!(rel 32473.1).as_bytes()
                 );
                 assert_eq!(
-                    mtc.signature_algorithm.as_slice_less_safe(),
+                    mtc.signature_algorithm.as_ref(),
                     &*pki_types::alg_id::ML_DSA_44
                 );
                 assert_eq!(mtc.revoked_ranges.len(), 2);

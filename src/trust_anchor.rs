@@ -72,6 +72,8 @@ fn extract_trust_anchor_from_v1_cert_der(
                             subject: subject.as_slice_less_safe().into(),
                             subject_public_key_info: spki.as_slice_less_safe().into(),
                             name_constraints: None,
+                            #[cfg(feature = "mtc")]
+                            mtc_config: None,
                         })
                     },
                 );
@@ -94,6 +96,8 @@ impl<'a> From<Cert<'a>> for TrustAnchor<'a> {
             name_constraints: cert
                 .name_constraints
                 .map(|nc| nc.as_slice_less_safe().into()),
+            #[cfg(feature = "mtc")]
+            mtc_config: cert.mtc_ca,
         }
     }
 }

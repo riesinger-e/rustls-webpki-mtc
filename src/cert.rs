@@ -15,11 +15,12 @@
 #[cfg(feature = "alloc")]
 use pki_types::SubjectPublicKeyInfoDer;
 use pki_types::{CertificateDer, DnsName};
-
+#[cfg(feature = "mtc")]
+use pki_types::mtc::MtcCa;
 use crate::der::{self, CONSTRUCTED, CONTEXT_SPECIFIC, DerIterator, FromDer, Tag};
 use crate::error::{DerTypeId, Error};
 #[cfg(feature = "mtc")]
-use crate::mtc::{MtcCa, remember_mtc_extension};
+use crate::mtc::remember_mtc_extension;
 use crate::public_values_eq;
 use crate::signed_data::SignedData;
 use crate::subject_name::{GeneralName, NameIterator, WildcardDnsNameRef};

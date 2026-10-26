@@ -6,9 +6,6 @@ use tls_vec::{OpaqueVec, TlsVec};
 pub(in crate::mtc) mod tls_parsing;
 mod tls_vec;
 
-/// OID of the MTC signature algorithm
-pub(crate) static OID_SIGNATURE_ALGORITHM: [u8; 8] = oid!(1, 3, 6, 1, 5, 5, 7, 6, 67);
-
 // constant sizes
 const TRUST_ANCHOR_ID_MAX_LENGTH: usize = 255;
 const COSIGNATURE_MAX_LENGTH: usize = (1 << 16) - 1;
@@ -37,7 +34,6 @@ impl<'a> TlsParse<'a> for Cosignature<'a> {
         })
     }
 }
-
 
 // for comparisons
 impl PartialEq for Cosignature<'_> {
@@ -139,7 +135,7 @@ impl<'a> TlsParse<'a> for MtcProof<'a> {
         let signatures = TlsVec::<_, _, Cosignature<'a>>::parse(reader)?;
         // verify signature sort order
         if !signatures.0.is_sorted() {
-            return Err(ParseError::UnorderedCosignatures)
+            return Err(ParseError::UnorderedCosignatures);
         }
 
         Ok(Self {
@@ -182,7 +178,7 @@ mod test {
             .unwrap();
         assert_eq!(
             signature_algorithm.as_slice_less_safe(),
-            super::OID_SIGNATURE_ALGORITHM.as_slice()
+            pki_types::alg_id::MTC.as_ref()
         );
 
         // parse signature

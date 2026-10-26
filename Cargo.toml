@@ -76,7 +76,7 @@ aws-lc-rs = ["dep:aws-lc-rs", "aws-lc-rs/aws-lc-sys", "aws-lc-rs/prebuilt-nasm"]
 aws-lc-rs-fips = ["dep:aws-lc-rs", "aws-lc-rs/fips"]
 ring = ["dep:ring"]
 std = ["alloc", "pki-types/std"]
-mtc = ["alloc"]
+mtc = ["alloc", "pki-types/mtc"]
 
 [dependencies]
 aws-lc-rs = { version = "1.18", optional = true, default-features = false }
@@ -120,3 +120,6 @@ enum_variant_marked_deprecated = "warn"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webpki_docsrs)'] }
+
+[patch.crates-io]
+rustls-pki-types = { git = "ssh://git@git.riesinger.xyz/masterarbeit/rustls-pki-types-mtc", branch = "mtc" }
