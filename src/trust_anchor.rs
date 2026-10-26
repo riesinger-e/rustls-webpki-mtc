@@ -1,5 +1,6 @@
 use pki_types::{CertificateDer, TrustAnchor};
-
+#[cfg(feature = "mtc")]
+use pki_types::mtc::{Cosigner, CosignerPolicy, TrustedSubtree};
 use crate::cert::{Cert, lenient_certificate_serial_number};
 use crate::der;
 use crate::error::{DerTypeId, Error};
@@ -41,6 +42,31 @@ pub fn anchor_from_trusted_cert<'a>(
         }
         Err(err) => Err(err),
     }
+}
+
+#[cfg(feature = "mtc")]
+/// See [anchor_from_trusted_cert].
+/// Allows for the specification of MTC CA parameters.
+pub fn anchor_from_trusted_mtc_cert<'a>(
+    cert: &'a CertificateDer<'a>,
+    cosigner_policy: CosignerPolicy,
+    revoked_ranges: &[core::range::RangeInclusive<u64>],
+    additional_cosigners: alloc::vec::Vec<Cosigner<'a>>,
+    trusted_subtrees: alloc::vec::Vec<TrustedSubtree>,
+) -> Result<TrustAnchor<'a>, Error> {
+    let cert_der = untrusted::Input::from(cert.as_ref());
+    let cert = Cert::for_trust_anchor(cert_der)?;
+    
+    let mut anchor = TrustAnchor::from(cert);
+    
+    let mtc_config = anchor.mtc_config.as_mut().ok_or(Error::CertNotMtc)?;
+    mtc_config.cosigner_policy = cosigner_policy;
+    mtc_config.revoked_ranges.extend(revoked_ranges);
+    // both are empty
+    mtc_config.additional_cosigners = additional_cosigners;
+    mtc_config.trusted_subtrees = trusted_subtrees;
+    
+    Ok(anchor)
 }
 
 /// Parses a v1 certificate directly into a TrustAnchor.

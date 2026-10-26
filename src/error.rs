@@ -64,6 +64,9 @@ pub enum Error {
 
     /// The certificate, or one of its issuers, has been revoked.
     CertRevoked,
+    
+    /// The certificate is not an MTC
+    CertNotMtc,
 
     /// The CRL is expired; i.e. the verification time is not before the time
     /// in the CRL nextUpdate field.
@@ -315,6 +318,7 @@ impl Error {
             Self::IssuerNotCrlSigner => 200,
 
             // Errors related to supported features used in an invalid way.
+            Self::CertNotMtc => 195,
             Self::InvalidCertValidity => 190,
             Self::InvalidNetworkMaskConstraint => 180,
             Self::InvalidSerialNumber => 170,

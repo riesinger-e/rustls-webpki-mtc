@@ -103,6 +103,9 @@ pub use {
 #[cfg(feature = "alloc")]
 pub use crl::{OwnedCertRevocationList, OwnedRevokedCert};
 
+#[cfg(feature = "mtc")]
+pub use trust_anchor::anchor_from_trusted_mtc_cert;
+
 #[cfg(feature = "ring")]
 /// Signature verification algorithm implementations using the *ring* crypto library.
 pub mod ring {
