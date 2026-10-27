@@ -715,18 +715,27 @@ const EKU_SERVER_AUTH: &[u8] = &oid!(1, 3, 6, 1, 5, 5, 7, 3, 1);
 // id-kp-clientAuth   OBJECT IDENTIFIER ::= { id-kp 2 }
 const EKU_CLIENT_AUTH: &[u8] = &oid!(1, 3, 6, 1, 5, 5, 7, 3, 2);
 
-struct OidDecoder<'a> {
+pub(crate) struct OidDecoder<'a> {
     encoded: &'a [u8],
     left: Option<usize>,
     first: bool,
 }
 
 impl<'a> OidDecoder<'a> {
-    fn new(encoded: &'a [u8]) -> Self {
+    // absolute
+    pub(crate) fn new(encoded: &'a [u8]) -> Self {
         Self {
             encoded,
             left: None,
             first: true,
+        }
+    }
+
+    pub(crate) fn new_relative(encoded: &'a [u8]) -> Self {
+        Self {
+            encoded,
+            left: None,
+            first: false,
         }
     }
 }
@@ -741,7 +750,7 @@ impl Iterator for OidDecoder<'_> {
 
         let mut cur = 0;
         for (i, &byte) in self.encoded.iter().enumerate() {
-            cur = (cur << 8) + usize::from(byte & 0x7f);
+            cur = (cur << 7) + usize::from(byte & 0x7f);
             if byte & 0x80 > 0 {
                 continue;
             }
