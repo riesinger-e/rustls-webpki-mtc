@@ -3,21 +3,21 @@
 use crate::mtc::cert_format::tls_parsing::{ParseError, TlsParse};
 use alloc::vec::Vec;
 
-fn parse_vec_size_field<const MIN_LENGTH: usize, const MAX_LENGTH: usize>(
-    reader: &mut untrusted::Reader<'_>,
-) -> Result<usize, ParseError> {
+pub(super) fn parse_vec_size_field<'a, const MIN_LENGTH: usize, const MAX_LENGTH: usize>(
+    reader: &mut untrusted::Reader<'a>,
+) -> Result<(usize, untrusted::Input<'a>), ParseError> {
     let size_field_bits = MAX_LENGTH.bit_width();
     // The bit width is max. 64 --> 64 / 8 is max. 8 --> fits into usize on every Rust supported platform
     #[allow(clippy::as_conversions)]
     let size_field_bytes = size_field_bits.div_ceil(u8::BITS) as usize;
 
     // parse the size field
-    let size_field = reader.read_bytes(size_field_bytes)?.as_slice_less_safe();
+    let size_field = reader.read_bytes(size_field_bytes)?;
 
     // copy size field into fixed size buffer for interpretation as number
     let mut size_field_buffer = [0u8; size_of::<usize>()];
     let start_idx = size_field_buffer.len() - size_field.len();
-    size_field_buffer[start_idx..].copy_from_slice(size_field);
+    size_field_buffer[start_idx..].copy_from_slice(size_field.as_slice_less_safe());
 
     let size: usize = usize::from_be_bytes(size_field_buffer);
 
@@ -30,12 +30,12 @@ fn parse_vec_size_field<const MIN_LENGTH: usize, const MAX_LENGTH: usize>(
         });
     }
 
-    Ok(size)
+    Ok((size, size_field))
 }
 
 /// Representation of TLS (RFC9846) variable-sized vectors of opaque elements (3.4)
 #[repr(transparent)]
-#[cfg_attr(any(feature = "std", feature = "alloc", test), derive(Debug))]
+#[derive(Debug)]
 pub(in crate::mtc) struct OpaqueVec<'a, const MIN_LENGTH: usize, const MAX_LENGTH: usize>(
     pub(in crate::mtc) untrusted::Input<'a>,
 );
@@ -44,7 +44,7 @@ impl<'a, const MIN_LENGTH: usize, const MAX_LENGTH: usize> TlsParse<'a>
     for OpaqueVec<'a, MIN_LENGTH, MAX_LENGTH>
 {
     fn parse(reader: &mut untrusted::Reader<'a>) -> Result<Self, ParseError> {
-        let size: usize = parse_vec_size_field::<MIN_LENGTH, MAX_LENGTH>(reader)?;
+        let size: usize = parse_vec_size_field::<MIN_LENGTH, MAX_LENGTH>(reader)?.0;
 
         // data does not need parsing
         let data = reader.read_bytes(size)?;
@@ -64,7 +64,7 @@ where
     T: TlsParse<'a>,
 {
     fn parse(reader: &mut untrusted::Reader<'a>) -> Result<Self, ParseError> {
-        let size: usize = parse_vec_size_field::<MIN_LENGTH, MAX_LENGTH>(reader)?;
+        let size: usize = parse_vec_size_field::<MIN_LENGTH, MAX_LENGTH>(reader)?.0;
 
         let raw_data = reader.read_bytes(size)?;
         let data = raw_data.read_all(ParseError::IncompleteRead, |reader| {

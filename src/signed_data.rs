@@ -247,8 +247,8 @@ pub(crate) fn verify_signature(
 }
 
 pub(crate) struct SubjectPublicKeyInfo<'a> {
-    algorithm_id_value: untrusted::Input<'a>,
-    key_value: untrusted::Input<'a>,
+    pub(crate) algorithm_id_value: untrusted::Input<'a>,
+    pub(crate) key_value: untrusted::Input<'a>,
 }
 
 impl<'a> FromDer<'a> for SubjectPublicKeyInfo<'a> {

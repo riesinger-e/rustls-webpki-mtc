@@ -1,15 +1,15 @@
 //! Types and helpers for the format of "regular" MTC certificates - section 6.2
 
+use crate::mtc::cert_format::tls_vec::parse_vec_size_field;
 use tls_parsing::{ParseError, TlsParse};
 use tls_vec::{OpaqueVec, TlsVec};
 
 pub(in crate::mtc) mod tls_parsing;
-mod tls_vec;
+pub(in crate::mtc) mod tls_vec;
 
 // constant sizes
 const TRUST_ANCHOR_ID_MAX_LENGTH: usize = 255;
 const COSIGNATURE_MAX_LENGTH: usize = (1 << 16) - 1;
-const EXTENSION_MAX_DATA_SIZE: usize = (1 << 16) - 1;
 const PROOF_EXTENSIONS_MAX_LENGTH: usize = (1 << 16) - 1;
 const PROOF_INCLUSION_PROOF_MAX_SIZE: usize = (1 << 16) - 1;
 const PROOF_SIGNATURES_MAX_LENGTH: usize = (1 << 24) - 1;
@@ -19,8 +19,8 @@ pub(in crate::mtc) type TrustAnchorId<'a> = OpaqueVec<'a, 1, TRUST_ANCHOR_ID_MAX
 
 /// MTC Cosignature
 pub(in crate::mtc) struct Cosignature<'a> {
-    cosigner_id: TrustAnchorId<'a>,
-    signature: OpaqueVec<'a, 0, COSIGNATURE_MAX_LENGTH>,
+    pub(in crate::mtc) cosigner_id: TrustAnchorId<'a>,
+    pub(in crate::mtc) signature: OpaqueVec<'a, 0, COSIGNATURE_MAX_LENGTH>,
 }
 
 impl<'a> TlsParse<'a> for Cosignature<'a> {
@@ -61,48 +61,32 @@ impl PartialOrd for Cosignature<'_> {
     }
 }
 
-/// Enum with unknown values / section 5.2.1
-#[repr(transparent)]
-#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
-pub(in crate::mtc) struct MtcLogEntryExtensionType(u16);
-
-impl TlsParse<'_> for MtcLogEntryExtensionType {
-    fn parse(reader: &mut untrusted::Reader<'_>) -> Result<Self, ParseError> {
-        let data = reader.read_bytes(size_of::<u16>())?;
-        let data: &[u8; size_of::<u16>()] = data.as_slice_less_safe().as_array().expect(
-            "Read size_of::<u16>() bytes --> Result should be an array of size_of::<u16> bytes",
-        );
-
-        let val = u16::from_be_bytes(*data);
-        Ok(Self(val))
-    }
+/// Extension (section 5.2.1) in a TLS vector.
+/// Completely unencoded, with its TLS vector size field also still stored.
+pub(in crate::mtc) struct MtcLogEntryExtensions<'a> {
+    pub(in crate::mtc) vec_header: untrusted::Input<'a>,
+    pub(in crate::mtc) vec_data: untrusted::Input<'a>,
 }
 
-/// Extension with payload / section 5.2.1
-pub(in crate::mtc) struct MtcLogEntryExtension<'a> {
-    extension_type: MtcLogEntryExtensionType,
-    extension_data: OpaqueVec<'a, 0, EXTENSION_MAX_DATA_SIZE>,
-}
-
-impl<'a> TlsParse<'a> for MtcLogEntryExtension<'a> {
+impl<'a> TlsParse<'a> for MtcLogEntryExtensions<'a> {
     fn parse(reader: &mut untrusted::Reader<'a>) -> Result<Self, ParseError> {
-        let typ = MtcLogEntryExtensionType::parse(reader)?;
-        let data = OpaqueVec::parse(reader)?;
+        let (size, header) = parse_vec_size_field::<0, PROOF_EXTENSIONS_MAX_LENGTH>(reader)?;
+        let raw_data = reader.read_bytes(size)?;
         Ok(Self {
-            extension_type: typ,
-            extension_data: data,
+            vec_header: header,
+            vec_data: raw_data,
         })
     }
 }
 
 pub(in crate::mtc) struct MtcProof<'a> {
-    extensions: TlsVec<0, PROOF_EXTENSIONS_MAX_LENGTH, MtcLogEntryExtension<'a>>,
+    pub(in crate::mtc) extensions: MtcLogEntryExtensions<'a>,
     // max. 48 bit
-    start: u64,
+    pub(in crate::mtc) start: u64,
     // max. 48 bit
-    end: u64,
-    inclusion_proof: OpaqueVec<'a, 0, PROOF_INCLUSION_PROOF_MAX_SIZE>,
-    signatures: TlsVec<0, PROOF_SIGNATURES_MAX_LENGTH, Cosignature<'a>>,
+    pub(in crate::mtc) end: u64,
+    pub(in crate::mtc) inclusion_proof: OpaqueVec<'a, 0, PROOF_INCLUSION_PROOF_MAX_SIZE>,
+    pub(in crate::mtc) signatures: TlsVec<0, PROOF_SIGNATURES_MAX_LENGTH, Cosignature<'a>>,
 }
 
 // parse a 48-bit TLS number
@@ -127,7 +111,7 @@ impl<'a> TlsParse<'a> for MtcProof<'a> {
     where
         Self: Sized,
     {
-        let extensions = TlsVec::parse(reader)?;
+        let extensions = MtcLogEntryExtensions::parse(reader)?;
         let start = parse_u48(reader)?;
         let end = parse_u48(reader)?;
         let inclusion_proof = OpaqueVec::parse(reader)?;
@@ -186,7 +170,6 @@ mod test {
         let proof = signature
             .read_all(ParseError::IncompleteRead, MtcProof::parse)
             .unwrap();
-        assert!(proof.extensions.0.is_empty());
         assert_eq!(proof.start, 8);
         assert_eq!(proof.end, 11);
         let signatures = proof.signatures.0;

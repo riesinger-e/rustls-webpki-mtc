@@ -1,0 +1,156 @@
+//! Signature verification with cosigners
+
+use crate::der;
+use crate::signed_data::SubjectPublicKeyInfo;
+use crate::verify_cert::OidDecoder;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use pki_types::InvalidSignature;
+use pki_types::mtc::{Cosigner, Hash};
+
+/// Verify cosigner signatures.
+/// Based on the RFC, section 7.2 step 12 and section 5.3.1.
+pub(super) fn verify_signature(
+    cosigner: &Cosigner<'_>,
+    signature_value: untrusted::Input<'_>,
+    log_id: &[usize],
+    start: u64,
+    end: u64,
+    expected_subtree_hash: &Hash,
+) -> Result<(), InvalidSignature> {
+    let Cosigner {
+        id: cosigner_id,
+        signature_algorithm,
+        public_key,
+    } = cosigner;
+
+    verify_signature_impl(
+        cosigner_id,
+        signature_algorithm.as_ref(),
+        public_key,
+        signature_value,
+        log_id,
+        start,
+        end,
+        expected_subtree_hash,
+    )
+}
+
+/// Verify cosigner signatures.
+/// Just like [verify_signature], but supports taking the cosigner key and algorithm from a Cert SPKI DER structure.
+pub(super) fn verify_signature_with_spki(
+    cosigner_id: &[u8],
+    spki: untrusted::Input<'_>,
+    signature_value: untrusted::Input<'_>,
+    log_id: &[usize],
+    start: u64,
+    end: u64,
+    expected_subtree_hash: &Hash,
+) -> Result<(), InvalidSignature> {
+    let SubjectPublicKeyInfo {
+        algorithm_id_value,
+        key_value,
+    } = der::read_all::<SubjectPublicKeyInfo<'_>>(spki).map_err(|_| InvalidSignature)?;
+
+    verify_signature_impl(
+        cosigner_id,
+        algorithm_id_value.as_slice_less_safe(),
+        key_value.as_slice_less_safe(),
+        signature_value,
+        log_id,
+        start,
+        end,
+        expected_subtree_hash,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_signature_impl(
+    cosigner_id: &[u8],
+    signature_algorithm: &[u8],
+    public_key: &[u8],
+    signature_value: untrusted::Input<'_>,
+    log_id: &[usize],
+    start: u64,
+    end: u64,
+    expected_subtree_hash: &Hash,
+) -> Result<(), InvalidSignature> {
+    let decoded_cosigner_id: Vec<_> = OidDecoder::new_relative(cosigner_id).collect();
+    let cosigned_subtree = create_cosigned_subtree(
+        &decoded_cosigner_id,
+        log_id,
+        start,
+        end,
+        expected_subtree_hash,
+    )?;
+    todo!("Verify the signature")
+}
+
+/// Create the cosigned subtree, already encoded in the TLS presentation language
+fn create_cosigned_subtree(
+    cosigner_id: &[usize],
+    log_id: &[usize],
+    start: u64,
+    end: u64,
+    subtree_hash: &Hash,
+) -> Result<Vec<u8>, InvalidSignature> {
+    // section 7.2 step 12:
+    // > Signatures are verified as described in Section 5.3.1. For each signature verification, the CosignedSubtree structure is constructed as follows:
+    // > 1. Set the CosignedSubtree's cosigner_name based on the cosigner ID as described in Section 5.3.1.
+    // > 2. Set the CosignedSubtree's timestamp to zero.
+    // > 3. Set the CosignedSubtree's log_origin based on log_id as described in Section 5.3.1.
+    // > 4. Set the CosignedSubtree's start and end to the MTCProof's start and end, respectively.
+    // > 5. Set the CosignedSubtree's subtree_hash to expected_subtree_hash.
+
+    fn create_oid_string(oid_parts: &[usize]) -> String {
+        static OID_BASE_STRING: &str = "oid/1.3.6.1.4.1";
+
+        let mut val = String::from(OID_BASE_STRING);
+        for part in oid_parts {
+            val.push('.');
+            val.push_str(part.to_string().as_str());
+        }
+        val
+    }
+
+    let cosigner_name = create_oid_string(cosigner_id).into_bytes();
+    if cosigner_name.len() > u8::MAX.into() {
+        return Err(InvalidSignature);
+    }
+    let log_origin = create_oid_string(log_id).into_bytes();
+    if log_origin.len() > u8::MAX.into() {
+        return Err(InvalidSignature);
+    }
+
+    let mut encoded = Vec::new();
+    // label
+    encoded.extend(b"subtree/v1\n\0");
+
+    // cosigner_name
+    // length is verified to be fit into one byte
+    #[allow(clippy::as_conversions)]
+    encoded.push(cosigner_name.len() as u8);
+    encoded.extend(cosigner_name);
+
+    // timestamp
+    encoded.extend(0u64.to_be_bytes());
+
+    // log_origin
+    // length is verified to be fit into one byte
+    #[allow(clippy::as_conversions)]
+    encoded.push(log_origin.len() as u8);
+    encoded.extend(log_origin);
+
+    // start
+    encoded.extend(start.to_be_bytes());
+    // end
+    encoded.extend(end.to_be_bytes());
+
+    // subtree_hash
+    match subtree_hash {
+        Hash::Sha256(value) => encoded.extend(value),
+        _other => return Err(InvalidSignature),
+    }
+
+    Ok(encoded)
+}

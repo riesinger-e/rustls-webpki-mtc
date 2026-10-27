@@ -1,7 +1,7 @@
 //! TLS (RFC 9846) parsing to read the cert data
 
+use core::error::Error;
 use core::fmt::Display;
-use std::error::Error;
 
 /// TLS (RFC 9846) Parsing Error
 #[derive(Debug)]

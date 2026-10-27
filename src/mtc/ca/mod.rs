@@ -2,9 +2,9 @@ mod format;
 
 use crate::x509::set_extension_once;
 use alloc::borrow::Cow;
+use alloc::vec::Vec;
+use core::range::RangeInclusive;
 use pki_types::mtc::{CosignerPolicy, HashAlgorithm, MtcCa};
-use std::prelude::rust_2015::Vec;
-use std::range::RangeInclusive;
 
 /// Remember the extension if it is an MTC extension.
 /// Returns Ok(true) if the given extension is handled, else Ok(false).
@@ -50,12 +50,12 @@ pub(crate) fn remember_mtc_extension<'a>(
 mod test {
     use crate::Cert;
     use crate::mtc::ca::HashAlgorithm;
-    use std::range::RangeInclusive;
+    use core::range::RangeInclusive;
 
     // check that an MTC CA cert is parsed correctly
     #[test]
     fn test_ca_cert_parsing() {
-        // generated with the official MTC RFC demo, cert_10_3.pem
+        // generated with the official MTC RFC demo, ca_cert.pem
         //   ./demo generate
         //   openssl x509 -outform der -in ca_cert.pem -out ca-cert.der
         let cert_der = include_bytes!(concat!(

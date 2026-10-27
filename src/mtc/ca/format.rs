@@ -2,8 +2,8 @@
 
 use crate::der;
 use crate::der::{Tag, nonnegative_integer};
+use crate::mtc::der_value_slice_as_u64_be;
 use crate::{DerTypeId, Error};
-use core::cmp::Ordering;
 
 /// extract the CA ID (= cosigner ID) from the CA subject
 pub(in crate::mtc) fn subject_extract_cosigner_id(
@@ -82,33 +82,8 @@ impl<'a> Extension<'a> {
 }
 
 fn der_parse_u64(reader: &mut untrusted::Reader<'_>) -> Result<u64, Error> {
-    const U64_BYTES: usize = size_of::<u64>();
-
     let value = nonnegative_integer(reader)?.as_slice_less_safe();
-
-    match value.len().cmp(&U64_BYTES) {
-        Ordering::Less => {
-            let mut buffer = [0u8; U64_BYTES];
-            let start_idx = buffer.len() - value.len();
-            buffer[start_idx..].copy_from_slice(value);
-            Ok(u64::from_be_bytes(buffer))
-        }
-        Ordering::Equal => {
-            let mut buffer = [0u8; U64_BYTES];
-            buffer.copy_from_slice(value);
-            Ok(u64::from_be_bytes(buffer))
-        }
-        Ordering::Greater => {
-            // leading zero byte --> remove
-            if value.len() == U64_BYTES + 1 && value[0] == 0x0 {
-                let mut buffer = [0u8; U64_BYTES];
-                buffer.copy_from_slice(&value[1..]);
-                Ok(u64::from_be_bytes(buffer))
-            } else {
-                Err(Error::ExtensionValueInvalid)
-            }
-        }
-    }
+    der_value_slice_as_u64_be(value).ok_or(Error::ExtensionValueInvalid)
 }
 
 #[cfg(test)]
