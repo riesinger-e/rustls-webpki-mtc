@@ -12,11 +12,6 @@
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-#[cfg(feature = "alloc")]
-use pki_types::SubjectPublicKeyInfoDer;
-use pki_types::{CertificateDer, DnsName};
-#[cfg(feature = "mtc")]
-use pki_types::mtc::MtcCa;
 use crate::der::{self, CONSTRUCTED, CONTEXT_SPECIFIC, DerIterator, FromDer, Tag};
 use crate::error::{DerTypeId, Error};
 #[cfg(feature = "mtc")]
@@ -28,15 +23,23 @@ use crate::x509::{
     DistributionPointName, Extension, UnknownExtensionPolicy, remember_extension,
     set_extension_once,
 };
+#[cfg(feature = "alloc")]
+use pki_types::SubjectPublicKeyInfoDer;
+#[cfg(feature = "mtc")]
+use pki_types::mtc::MtcCa;
+use pki_types::{CertificateDer, DnsName};
 
 /// A parsed X509 certificate.
 pub struct Cert<'a> {
+    pub(crate) version: untrusted::Input<'a>,
     pub(crate) serial: untrusted::Input<'a>,
     pub(crate) signed_data: SignedData<'a>,
     pub(crate) issuer: untrusted::Input<'a>,
     pub(crate) validity: untrusted::Input<'a>,
     pub(crate) subject: untrusted::Input<'a>,
     pub(crate) spki: untrusted::Input<'a>,
+    // all extensions, raw
+    pub(crate) extensions: Option<untrusted::Input<'a>>,
 
     pub(crate) basic_constraints: Option<untrusted::Input<'a>>,
     // key usage (KU) extension (if any). When validating certificate revocation lists (CRLs) this
@@ -84,7 +87,7 @@ impl<'a> Cert<'a> {
         tbs.read_all(
             Error::TrailingData(DerTypeId::CertificateTbsCertificate),
             |tbs| {
-                version3(tbs)?;
+                let version = version3(tbs)?;
 
                 let serial = lenient_certificate_serial_number(tbs)?;
 
@@ -107,12 +110,14 @@ impl<'a> Cert<'a> {
                 // contain them.
 
                 let mut cert = Cert {
+                    version,
                     signed_data,
                     serial,
                     issuer,
                     validity,
                     subject,
                     spki,
+                    extensions: None,
 
                     basic_constraints: None,
                     key_usage: None,
@@ -142,20 +147,24 @@ impl<'a> Cert<'a> {
                         der::Tag::ContextSpecificConstructed3,
                         Error::TrailingData(DerTypeId::CertificateExtensions),
                         |tagged| {
-                            der::nested_of_mut(
-                                tagged,
-                                der::Tag::Sequence,
-                                der::Tag::Sequence,
-                                Error::TrailingData(DerTypeId::Extension),
-                                ALLOW_EMPTY,
-                                |extension| {
-                                    remember_cert_extension(
-                                        &mut cert,
-                                        &Extension::from_der(extension)?,
-                                        ext_policy,
-                                    )
-                                },
-                            )
+                            let (extensions, ()) = tagged.read_partial(|reader| {
+                                der::nested_of_mut(
+                                    reader,
+                                    der::Tag::Sequence,
+                                    der::Tag::Sequence,
+                                    Error::TrailingData(DerTypeId::Extension),
+                                    ALLOW_EMPTY,
+                                    |extension| {
+                                        remember_cert_extension(
+                                            &mut cert,
+                                            &Extension::from_der(extension)?,
+                                            ext_policy,
+                                        )
+                                    },
+                                )
+                            })?;
+                            cert.extensions = Some(extensions);
+                            Ok(())
                         },
                     )?;
                 }
@@ -263,18 +272,19 @@ impl<'a> Cert<'a> {
 
 // mozilla::pkix supports v1, v2, v3, and v4, including both the implicit
 // (correct) and explicit (incorrect) encoding of v1. We allow only v3.
-fn version3(input: &mut untrusted::Reader<'_>) -> Result<(), Error> {
+fn version3<'a>(input: &mut untrusted::Reader<'a>) -> Result<untrusted::Input<'a>, Error> {
     der::nested(
         input,
         der::Tag::ContextSpecificConstructed0,
         Error::UnsupportedCertVersion,
-        |input| {
-            let version = u8::from_der(input)?;
+        |reader| {
+            let (input, version) = reader.read_partial(u8::from_der)?;
+
             if version != 2 {
                 // v3
                 return Err(Error::UnsupportedCertVersion);
             }
-            Ok(())
+            Ok(input)
         },
     )
 }
