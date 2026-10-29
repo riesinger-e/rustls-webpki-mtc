@@ -175,27 +175,49 @@ pub(crate) fn verify_signature(
 
 #[cfg(test)]
 mod tests {
+    use crate::Cert;
+    use crate::Error;
     use crate::mtc::verify_signature::verify_signature;
     use crate::verify_cert::OidDecoder;
-    use crate::{Cert, Error};
     use alloc::boxed::Box;
     use alloc::vec::Vec;
     use base64::Engine;
     use base64::engine::GeneralPurposeConfig;
-    use pki_types::mtc::{CosignerPolicy, Hash, TrustedSubtree};
-    use pki_types::{CertificateDer, TrustAnchor};
+    use pki_types::mtc::{Cosigner, CosignerPolicy, Hash, TrustedSubtree};
+    use pki_types::{CertificateDer, TrustAnchor, alg_id};
 
-    // verify the existing OID decoder functionality
-    #[test]
-    fn verify_oid_decoder() {
-        // we know form other test that the as_bytes() representation of this OID is correct
-        let oid = x509_parser::asn1_rs::oid!(rel 32473.1);
-
-        let decoded_oid: Vec<_> = OidDecoder::new_relative(oid.as_bytes()).collect();
-        assert_eq!(decoded_oid.as_slice(), &[32473, 1]);
+    macro_rules! cert_from_name {
+        ($name:literal) => {
+            Cert::from_der(untrusted::Input::from(include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/mtc/",
+                $name
+            ))))
+        };
     }
 
-    fn read_ca_cert(landmarks: Vec<TrustedSubtree>) -> Result<TrustAnchor<'static>, Error> {
+    fn base64_decode(
+        val: &[u8],
+        engine: &mut Option<base64::engine::GeneralPurpose>,
+    ) -> Result<Vec<u8>, Box<dyn core::error::Error>> {
+        let engine = engine.get_or_insert_with(|| {
+            let alphabet = base64::alphabet::STANDARD;
+            base64::engine::GeneralPurpose::new(&alphabet, GeneralPurposeConfig::new())
+        });
+
+        Ok(engine.decode(val)?)
+    }
+
+    fn read_ca_cert() -> Result<TrustAnchor<'static>, Box<dyn core::error::Error>> {
+        fn sha256_from_base64(
+            val: &[u8],
+            engine: &mut Option<base64::engine::GeneralPurpose>,
+        ) -> Result<Hash, Box<dyn core::error::Error>> {
+            Ok(Hash::Sha256(
+                base64_decode(val, engine)?.as_slice().try_into()?,
+            ))
+        }
+
         // generated with the official MTC RFC demo, ca_cert.pem
         //   ./demo generate
         //   openssl x509 -outform der -in ca_cert.pem -out ca-cert.der
@@ -204,37 +226,6 @@ mod tests {
             "/tests/mtc/ca-cert.der"
         ));
         static CA_CERT_DER: CertificateDer<'static> = CertificateDer::from_slice(CA_CERT_BIN);
-
-        crate::trust_anchor::anchor_from_trusted_mtc_cert(
-            &CA_CERT_DER,
-            CosignerPolicy::default(),
-            &[],
-            Vec::new(),
-            landmarks,
-        )
-    }
-
-    fn sha256_from_base64(
-        val: &[u8],
-        engine: &mut Option<base64::engine::GeneralPurpose>,
-    ) -> Result<Hash, Box<dyn core::error::Error>> {
-        let engine = engine.get_or_insert_with(|| {
-            let alphabet = base64::alphabet::STANDARD;
-            base64::engine::GeneralPurpose::new(&alphabet, GeneralPurposeConfig::new())
-        });
-
-        Ok(Hash::Sha256(engine.decode(val)?.as_slice().try_into()?))
-    }
-
-    #[test]
-    fn test_landmark_cert_verification() -> Result<(), Box<dyn core::error::Error>> {
-        // generated with the official MTC RFC demo, cert_10_12.pem
-        //   ./demo generate
-        //   openssl x509 -outform der -in cert_10_12.pem -out cert-landmark.der
-        let cert_der = include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/mtc/cert-landmark.der"
-        ));
 
         // landmarks are the output of ./demo generate
         let mut engine = None;
@@ -255,28 +246,28 @@ mod tests {
             )
             .unwrap(),
             TrustedSubtree::new(
-                2,
+                1,
                 sha256_from_base64(b"blLA+9WDzuzi1pEWyHy06XW17rgrWhiKbDaV7WxXzpw=", e)?,
                 0,
                 1024,
             )
             .unwrap(),
             TrustedSubtree::new(
-                2,
+                1,
                 sha256_from_base64(b"xc/+sJddkjD4FL8rGdrkbMItGKsWrhfhIRp8vYprdiI=", e)?,
                 1024,
                 2036,
             )
             .unwrap(),
             TrustedSubtree::new(
-                3,
+                1,
                 sha256_from_base64(b"H89Du5MigjGfW+Dd+K2HSnMi5S5JPBeLAf+IoZHO8jY=", e)?,
                 2032,
                 2048,
             )
             .unwrap(),
             TrustedSubtree::new(
-                3,
+                1,
                 sha256_from_base64(b"NI0xeg7ALqrMDJYtMMIcnU6b5E4dFYdWd6dI8yH2wh0=", e)?,
                 2048,
                 2122,
@@ -284,8 +275,34 @@ mod tests {
             .unwrap(),
         ];
 
-        let cert = Cert::from_der(untrusted::Input::from(cert_der))?;
-        let ca = read_ca_cert(landmarks)?;
+        let ca = crate::trust_anchor::anchor_from_trusted_mtc_cert(
+            &CA_CERT_DER,
+            CosignerPolicy::All,
+            &[],
+            Vec::new(),
+            landmarks,
+        )?;
+
+        Ok(ca)
+    }
+
+    // verify the existing OID decoder functionality
+    #[test]
+    fn verify_oid_decoder() {
+        // we know form other test that the as_bytes() representation of this OID is correct
+        let oid = x509_parser::asn1_rs::oid!(rel 32473.1);
+
+        let decoded_oid: Vec<_> = OidDecoder::new_relative(oid.as_bytes()).collect();
+        assert_eq!(decoded_oid.as_slice(), &[32473, 1]);
+    }
+
+    #[test]
+    fn test_landmark_cert_verification() -> Result<(), Box<dyn core::error::Error>> {
+        // generated with the official MTC RFC demo, cert_10_12.pem
+        //   ./demo generate
+        //   openssl x509 -outform der -in cert_10_12.pem -out cert-landmark.der
+        let cert = cert_from_name!("cert-landmark.der")?;
+        let ca = read_ca_cert()?;
 
         assert!(ca.mtc_config.is_some());
 
@@ -305,13 +322,8 @@ mod tests {
         // generated with the official MTC RFC demo, cert_10_3.pem
         //   ./demo generate
         //   openssl x509 -outform der -in cert_10_3.pem -out cert-standalone-simple.der
-        let cert_der = include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/mtc/cert-standalone-simple.der"
-        ));
-        let cert = Cert::from_der(untrusted::Input::from(cert_der))?;
-
-        let ca_cert = read_ca_cert(Vec::new())?;
+        let cert = cert_from_name!("cert-standalone-simple.der")?;
+        let ca_cert = read_ca_cert()?;
 
         assert!(ca_cert.mtc_config.is_some());
         verify_signature(
@@ -320,6 +332,222 @@ mod tests {
             ca_cert.subject_public_key_info.as_ref().into(),
             crate::ALL_VERIFICATION_ALGS,
         )?;
+
+        Ok(())
+    }
+
+    /// Test that erronous cert formats are recognized
+    #[test]
+    fn test_cert_format() -> Result<(), Box<dyn core::error::Error>> {
+        let certs = [cert_from_name!("cert_10_1.der")];
+
+        for cert in certs {
+            assert_eq!(cert.map(|_| ()), Err(Error::BadDer))
+        }
+
+        Ok(())
+    }
+
+    /// Test that all demo cert verifications deliver the expected results
+    #[test]
+    #[cfg(feature = "aws-lc-rs")]
+    fn test_cert_verification_complex() -> Result<(), Box<dyn core::error::Error>> {
+        let mut b64e = None;
+        macro_rules! cosigner {
+            (rel $($oid:literal ).*, $alg_id: expr, $private_key: literal, $encoder: ident) => {
+                {
+                    use aws_lc_rs::signature::KeyPair;
+                    use aws_lc_rs::encoding::AsDer;
+                    use aws_lc_rs::signature;
+
+                    let private_key = base64_decode($private_key, &mut $encoder)?;
+                    let public_key = match $alg_id {
+                        pki_types::alg_id::ML_DSA_44 => signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_44_SIGNING, &private_key)?.public_key().as_der(),
+                        pki_types::alg_id::ML_DSA_65 => signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_65_SIGNING, &private_key)?.public_key().as_der(),
+                        pki_types::alg_id::ML_DSA_87 => signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_87_SIGNING, &private_key)?.public_key().as_der(),
+                        other => unimplemented!("Get public key from private key with algorithm {other:?}"),
+                    }?;
+                    let public_key = alloc::borrow::Cow::from(public_key.as_ref().to_vec());
+
+                    let id = x509_parser::asn1_rs::oid!(rel $($oid).*).as_bytes().to_vec();
+                    Cosigner {
+                        id: id.into(),
+                        signature_algorithm: $alg_id,
+                        public_key,
+                    }
+                }
+            }
+        }
+
+        // cosigners from the RFC demo, mtc.json
+        let cosigners = [
+            cosigner!(rel 32473.2.2, alg_id::ML_DSA_65, b"MDQCAQAwCwYJYIZIAWUDBAMSBCKAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f", b64e),
+            cosigner!(rel 32473.2.3, alg_id::ML_DSA_87, b"MDQCAQAwCwYJYIZIAWUDBAMTBCKAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f", b64e),
+            cosigner!(rel 32473.3.1, alg_id::ML_DSA_44, b"MDQCAQAwCwYJYIZIAWUDBAMRBCKAIFjaimQAg5B4OTbZNTnt/YcmjPmbijnynHnvsyPLk8Sg", b64e),
+            cosigner!(rel 32473.3.2, alg_id::ML_DSA_44, b"MDQCAQAwCwYJYIZIAWUDBAMRBCKAIIGtnTZ2R5Pgp/LvgBo1ZTPJwaKcFmxe8r0wPhNvs8Sa", b64e),
+            cosigner!(rel 32473.3.3, alg_id::ML_DSA_44, b"MDQCAQAwCwYJYIZIAWUDBAMRBCKAICTZRYfEBWrOAIYqcvvXMwD4WUiGtodBvmL6yurbazOH", b64e),
+            cosigner!(rel 32473.3.4, alg_id::ML_DSA_44, b"MDQCAQAwCwYJYIZIAWUDBAMRBCKAIHdUCNv4IVovnAvS64yzdYpQhMMiT8OcHpFU2zF6ByZr", b64e),
+        ];
+
+        // all certs generated with the official demo
+        //  ./demo generate
+        //  openssl x509 -outform -der -in <CERT>.pem -out <CERT>.der
+        let certs = [
+            (
+                cert_from_name!("cert_10_0.der")?,
+                vec![cosigners[0].clone()],
+                Ok(()),
+            ),
+            // deliberate format error
+            // cert_from_name!("cert_10_1.der"),
+            (
+                cert_from_name!("cert_10_2.der")?,
+                vec![cosigners[0].clone()],
+                Err(Error::InvalidSignatureForPublicKey),
+            ),
+            (cert_from_name!("cert_10_3.der")?, Vec::new(), Ok(())),
+            (
+                cert_from_name!("cert_10_4.der")?,
+                vec![cosigners[2].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_10_5.der")?,
+                vec![cosigners[3].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_10_6.der")?,
+                vec![cosigners[4].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_10_7.der")?,
+                vec![cosigners[5].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_10_8.der")?,
+                cosigners.to_vec(),
+                Err(Error::MtcMissingRequiredCosigner),
+            ),
+            (
+                cert_from_name!("cert_10_9.der")?,
+                cosigners.to_vec(),
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_10_10.der")?,
+                Vec::new(),
+                Err(Error::MtcMissingRequiredCosigner),
+            ),
+            (
+                cert_from_name!("cert_10_11.der")?,
+                vec![cosigners[1].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_10_11.der")?,
+                vec![cosigners[1].clone(), cosigners[2].clone()],
+                Err(Error::MtcMissingRequiredCosigner),
+            ),
+            (
+                cert_from_name!("cert_10_12.der")?,
+                cosigners.to_vec(),
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_10_13.der")?,
+                cosigners.to_vec(),
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_10_14.der")?,
+                vec![cosigners[0].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_32_0.der")?,
+                vec![cosigners[1].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_32_1.der")?,
+                cosigners.to_vec(),
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_33_0.der")?,
+                vec![cosigners[1].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_33_1.der")?,
+                cosigners.to_vec(),
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_2034_0.der")?,
+                vec![cosigners[1].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_2034_1.der")?,
+                cosigners.to_vec(),
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_2035_0.der")?,
+                vec![cosigners[1].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_2035_1.der")?,
+                cosigners.to_vec(),
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_2035_2.der")?,
+                cosigners.to_vec(),
+                Err(Error::MtcInvalidInclusionProof),
+            ),
+            (
+                cert_from_name!("cert_2078_0.der")?,
+                vec![cosigners[1].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_2078_1.der")?,
+                cosigners.to_vec(),
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_2121_0.der")?,
+                vec![cosigners[1].clone()],
+                Ok(()),
+            ),
+            (
+                cert_from_name!("cert_2121_1.der")?,
+                cosigners.to_vec(),
+                Ok(()),
+            ),
+        ];
+
+        let ca_cert = read_ca_cert()?;
+
+        assert!(ca_cert.mtc_config.is_some());
+        let mtc_config = ca_cert.mtc_config.unwrap();
+        let spki = ca_cert.subject_public_key_info.as_ref().into();
+
+        for (i, (cert, cosigners, result)) in certs.into_iter().enumerate() {
+            let mut mtc_config = mtc_config.clone();
+            mtc_config.additional_cosigners = cosigners;
+            std::eprintln!("{i}");
+            assert_eq!(
+                verify_signature(&cert, &mtc_config, spki, crate::ALL_VERIFICATION_ALGS),
+                result
+            );
+        }
 
         Ok(())
     }

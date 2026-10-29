@@ -5,8 +5,8 @@ use crate::verify_cert::OidDecoder;
 use crate::{Error, UnsupportedSignatureAlgorithmForPublicKeyContext, der};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use pki_types::SignatureVerificationAlgorithm;
 use pki_types::mtc::{Cosigner, Hash};
-use pki_types::{SignatureVerificationAlgorithm, alg_id};
 
 /// Common args to the verify_signature* functions.
 pub(super) struct VerifySignatureArgs<'a> {
@@ -90,22 +90,8 @@ fn verify_signature_impl(
         expected_subtree_hash,
     )?;
 
-    // Signature algorithm selection logic is based on the RFC repository, `/demo/encode.go`,
-    // lines 46-51 and lines 273-287.
-    // --> Find a suitable public_key_alg_id for the signature_algorithm that results in the
-    // same selection that the RFC demo makes.
-    const ECDSA_SHA256_SLICE: &[u8] = alg_id::ECDSA_SHA256.as_slice();
-    const ECDSA_SHA384_SLICE: &[u8] = alg_id::ECDSA_SHA384.as_slice();
-
-    let public_key_alg_id = match signature_algorithm {
-        // 2 special cases where signature_algorithm and public_key_alg_id differ (from the demo)
-        ECDSA_SHA256_SLICE => alg_id::ECDSA_P256.as_slice(),
-        ECDSA_SHA384_SLICE => alg_id::ECDSA_P384.as_slice(),
-        // Rest: use the signature_algorithm as public_key_alg_id - works for ED25519 and ML_DSA*.
-        // Probably doesn't work with RSA etc. - if you use RSA with MTC certs, you don't get the
-        // use case.
-        other => other,
-    };
+    // This works for all ML_DSA signatures - we don't care about "classic" cryptgraphy
+    let public_key_alg_id = signature_algorithm;
 
     // find algorithm with both identifiers matching
     let algorithm = supported_algorithms
