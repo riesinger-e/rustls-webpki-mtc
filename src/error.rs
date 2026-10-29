@@ -64,9 +64,6 @@ pub enum Error {
 
     /// The certificate, or one of its issuers, has been revoked.
     CertRevoked,
-    
-    /// The certificate is not an MTC
-    CertNotMtc,
 
     /// The CRL is expired; i.e. the verification time is not before the time
     /// in the CRL nextUpdate field.
@@ -131,11 +128,6 @@ pub enum Error {
     /// A name constraint was malformed, potentially containing invalid characters or
     /// invalid labels.
     MalformedNameConstraint,
-
-    #[cfg(feature = "mtc")]
-    /// Expected the subject field of an MTC CA cert or the issuer field of an MTC Cert to contain an
-    /// MTC CA ID (= a PKIX DN with 1 specific attribute), but found an invalid format.
-    MalformedMtcCaId,
 
     /// The maximum number of name constraint comparisons has been reached.
     MaximumNameConstraintComparisonsExceeded,
@@ -284,6 +276,27 @@ pub enum Error {
     UnsupportedSignatureAlgorithmForPublicKeyContext(
         UnsupportedSignatureAlgorithmForPublicKeyContext,
     ),
+
+    #[cfg(feature = "mtc")]
+    /// The MTC Hash algorithm is not supported.
+    UnsupportedMtcHashAlgorithm,
+
+    #[cfg(feature = "mtc")]
+    /// The certificate is not an MTC
+    CertNotMtc,
+
+    #[cfg(feature = "mtc")]
+    /// Expected the subject field of an MTC CA cert or the issuer field of an MTC Cert to contain an
+    /// MTC CA ID (= a PKIX DN with 1 specific attribute), but found an invalid format.
+    MalformedMtcCaId,
+
+    #[cfg(feature = "mtc")]
+    /// The MTC inclusion proof is not valid.
+    MtcInvalidInclusionProof,
+
+    #[cfg(feature = "mtc")]
+    /// A required Cosigner (per [pki_types::mtc::CosignerPolicy]) is missing.
+    MtcMissingRequiredCosigner,
 }
 
 impl Error {
@@ -308,6 +321,10 @@ impl Error {
             | Self::UnknownRevocationStatus
             | Self::CrlExpired { .. } => 270,
             Self::InvalidCrlSignatureForPublicKey | Self::InvalidSignatureForPublicKey => 260,
+            #[cfg(feature = "mtc")]
+            Self::MtcInvalidInclusionProof => 265,
+            #[cfg(feature = "mtc")]
+            Self::MtcMissingRequiredCosigner => 264,
             Self::SignatureAlgorithmMismatch => 250,
             Self::EmptyEkuExtension => 245,
             #[allow(deprecated)]
@@ -318,6 +335,7 @@ impl Error {
             Self::IssuerNotCrlSigner => 200,
 
             // Errors related to supported features used in an invalid way.
+            #[cfg(feature = "mtc")]
             Self::CertNotMtc => 195,
             Self::InvalidCertValidity => 190,
             Self::InvalidNetworkMaskConstraint => 180,
@@ -344,6 +362,8 @@ impl Error {
             Self::UnsupportedRevocationReason => 90,
             Self::UnsupportedRevocationReasonsPartitioning => 80,
             Self::UnsupportedCrlIssuingDistributionPoint => 70,
+            #[cfg(feature = "mtc")]
+            Self::UnsupportedMtcHashAlgorithm => 65,
             Self::MaximumPathDepthExceeded => 61,
 
             #[cfg(feature = "mtc")]

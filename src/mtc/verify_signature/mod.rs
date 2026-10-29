@@ -9,9 +9,9 @@ use crate::mtc::cert_format::MtcProof;
 use crate::mtc::cert_format::tls_parsing::TlsParse;
 use crate::mtc::der_value_slice_as_u64_be;
 use crate::verify_cert::OidDecoder;
-use crate::{Cert, der};
+use crate::{Cert, DerTypeId, Error, der};
 use alloc::vec::Vec;
-use pki_types::InvalidSignature;
+use pki_types::SignatureVerificationAlgorithm;
 use pki_types::mtc::{CosignerPolicy, Hash, MtcCa};
 
 /// Implements certificate signature verification based on the MTC-RFC Draft, section 7.2
@@ -19,20 +19,20 @@ pub(crate) fn verify_signature(
     cert: &Cert<'_>,
     ca_mtc_config: &MtcCa<'_>,
     ca_spki: untrusted::Input<'_>,
-) -> Result<(), InvalidSignature> {
+    supported_algorithms: &[&dyn SignatureVerificationAlgorithm],
+) -> Result<(), Error> {
     // Step 1:
     // >  Check that the TBSCertificate's signature field is id-alg-mtcProof with omitted parameters.
     // >  If this check fails, abort this process and fail verification.
     // The cert parsing ensures that TBSCertificates `signature` and the outer `signatureAlgorithm`
     // contain the same value.
     let signature_algorithm = cert.signed_data.algorithm;
-    let signature_algorithm = signature_algorithm
-        .read_all(crate::Error::BadDer, |reader| {
-            der::expect_tag(reader, Tag::OID)
-        })
-        .map_err(|_| InvalidSignature)?;
+    let signature_algorithm = signature_algorithm.read_all(
+        Error::TrailingData(DerTypeId::SignatureAlgorithm),
+        |reader| der::expect_tag(reader, Tag::OID),
+    )?;
     if signature_algorithm.as_slice_less_safe() != pki_types::alg_id::MTC.as_ref() {
-        return Err(InvalidSignature);
+        return Err(Error::SignatureAlgorithmMismatch);
     }
 
     // Step 2:
@@ -42,14 +42,14 @@ pub(crate) fn verify_signature(
     let mtc_proof = cert
         .signed_data
         .signature
-        .read_all(InvalidSignature, |reader| {
-            MtcProof::parse(reader).map_err(|_| InvalidSignature)
+        .read_all(Error::TrailingData(DerTypeId::Signature), |reader| {
+            MtcProof::parse(reader).map_err(|_| Error::BadDer)
         })?;
 
     // Step 3:
     // > Let serial be the certificate's serial number. If serial is negative or greater than (2^64)-1,
     // > abort this process and fail verification.
-    let serial = der_value_slice_as_u64_be(cert.serial()).ok_or(InvalidSignature)?;
+    let serial = der_value_slice_as_u64_be(cert.serial()).ok_or(Error::BadDer)?;
 
     // Step 4:
     // > If serial is contained in one of the relying party's revoked ranges (Section 7.5), abort
@@ -59,7 +59,7 @@ pub(crate) fn verify_signature(
         .iter()
         .any(|range| range.contains(&serial))
     {
-        return Err(InvalidSignature);
+        return Err(Error::CertRevoked);
     }
 
     // Step 5:
@@ -70,23 +70,22 @@ pub(crate) fn verify_signature(
     #[allow(clippy::as_conversions)]
     let log_number = (serial >> 48) as u16;
     if log_number == 0 {
-        return Err(InvalidSignature);
+        return Err(Error::InvalidSerialNumber);
     }
 
     // Step 6: moved to just before step 12, as the computed value is only needed there
 
     // Steps 7, 8 and 9 are replaced with the one-pass hashing procedure described in the RFC,
     // section 7.2, below the original steps
-    let entry_hash = entry_hash::compute(ca_mtc_config.hash_algorithm, &mtc_proof.extensions, cert)
-        .ok_or(InvalidSignature)?;
+    let entry_hash =
+        entry_hash::compute(ca_mtc_config.hash_algorithm, &mtc_proof.extensions, cert)?;
 
     // Step 10:
     // > Let expected_subtree_hash be the result of evaluating the MTCProof's inclusion_proof for
     // > entry index, with hash entry_hash, of the subtree described by the MTCProof's start and end,
     // > following the procedure in Section 4.3.2. If evaluation fails, abort this process and fail
     // > verification.
-    let expected_subtree_hash =
-        inclusion_proof::evaluate(&mtc_proof, index, entry_hash).ok_or(InvalidSignature)?;
+    let expected_subtree_hash = inclusion_proof::evaluate(&mtc_proof, index, entry_hash)?;
 
     // Step 11:
     // > If log_number, start, and end match a trusted subtree (Section 7.4) for the CA, check that
@@ -105,7 +104,7 @@ pub(crate) fn verify_signature(
                 return if subtree_hash == expected_subtree_hash {
                     Ok(())
                 } else {
-                    Err(InvalidSignature)
+                    Err(Error::MtcInvalidInclusionProof)
                 };
             }
             // hash algorithms do not match --> ignore
@@ -118,7 +117,7 @@ pub(crate) fn verify_signature(
     // > (Section 5.2).
     // We decode the ca id to its components
     let log_id = {
-        let mut log_id: Vec<_> = OidDecoder::new(ca_mtc_config.ca_id.as_ref()).collect();
+        let mut log_id: Vec<_> = OidDecoder::new_relative(ca_mtc_config.ca_id.as_ref()).collect();
         log_id.push(0);
         // u16 is always <= usize
         #[allow(clippy::as_conversions)]
@@ -130,6 +129,13 @@ pub(crate) fn verify_signature(
     // > Otherwise, check that the MTCProof's signatures contain a sufficient set of valid signatures
     // > from cosigners to satisfy the relying party's cosigner requirements (Section 7.3).
     // > Unrecognized cosigners MUST be ignored.
+    let common_args = cosigner::VerifySignatureArgs {
+        log_id,
+        start: mtc_proof.start,
+        end: mtc_proof.end,
+        expected_subtree_hash,
+        supported_algorithms,
+    };
 
     // Verify CA signature
     let ca_signature = mtc_proof
@@ -137,16 +143,13 @@ pub(crate) fn verify_signature(
         .0
         .iter()
         .find(|cs| cs.cosigner_id.0.as_slice_less_safe() == ca_mtc_config.ca_id.as_ref())
-        .ok_or(InvalidSignature)?;
+        .ok_or(Error::MtcMissingRequiredCosigner)?;
 
     cosigner::verify_signature_with_spki(
         &ca_mtc_config.ca_id,
         ca_spki,
         ca_signature.signature.0,
-        &log_id,
-        mtc_proof.start,
-        mtc_proof.end,
-        &expected_subtree_hash,
+        &common_args,
     )?;
 
     match ca_mtc_config.cosigner_policy {
@@ -160,16 +163,9 @@ pub(crate) fn verify_signature(
                     .0
                     .iter()
                     .find(|cs| cs.cosigner_id.0.as_slice_less_safe() == cosigner.id.as_ref())
-                    .ok_or(InvalidSignature)?;
+                    .ok_or(Error::MtcMissingRequiredCosigner)?;
 
-                cosigner::verify_signature(
-                    cosigner,
-                    signature.signature.0,
-                    &log_id,
-                    mtc_proof.start,
-                    mtc_proof.end,
-                    &expected_subtree_hash,
-                )?
+                cosigner::verify_signature(cosigner, signature.signature.0, &common_args)?
             }
 
             Ok(())
@@ -179,15 +175,15 @@ pub(crate) fn verify_signature(
 
 #[cfg(test)]
 mod tests {
-    use crate::Cert;
     use crate::mtc::verify_signature::verify_signature;
     use crate::verify_cert::OidDecoder;
+    use crate::{Cert, Error};
     use alloc::boxed::Box;
     use alloc::vec::Vec;
     use base64::Engine;
     use base64::engine::GeneralPurposeConfig;
-    use pki_types::CertificateDer;
     use pki_types::mtc::{CosignerPolicy, Hash, TrustedSubtree};
+    use pki_types::{CertificateDer, TrustAnchor};
 
     // verify the existing OID decoder functionality
     #[test]
@@ -197,6 +193,25 @@ mod tests {
 
         let decoded_oid: Vec<_> = OidDecoder::new_relative(oid.as_bytes()).collect();
         assert_eq!(decoded_oid.as_slice(), &[32473, 1]);
+    }
+
+    fn read_ca_cert(landmarks: Vec<TrustedSubtree>) -> Result<TrustAnchor<'static>, Error> {
+        // generated with the official MTC RFC demo, ca_cert.pem
+        //   ./demo generate
+        //   openssl x509 -outform der -in ca_cert.pem -out ca-cert.der
+        static CA_CERT_BIN: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/mtc/ca-cert.der"
+        ));
+        static CA_CERT_DER: CertificateDer<'static> = CertificateDer::from_slice(CA_CERT_BIN);
+
+        crate::trust_anchor::anchor_from_trusted_mtc_cert(
+            &CA_CERT_DER,
+            CosignerPolicy::default(),
+            &[],
+            Vec::new(),
+            landmarks,
+        )
     }
 
     fn sha256_from_base64(
@@ -220,15 +235,6 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/tests/mtc/cert-landmark.der"
         ));
-
-        // generated with the official MTC RFC demo, ca_cert.pem
-        //   ./demo generate
-        //   openssl x509 -outform der -in ca_cert.pem -out ca-cert.der
-        let ca_cert_der = include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/mtc/ca-cert.der"
-        ));
-        let ca_cert_der = CertificateDer::from_slice(ca_cert_der);
 
         // landmarks are the output of ./demo generate
         let mut engine = None;
@@ -279,13 +285,7 @@ mod tests {
         ];
 
         let cert = Cert::from_der(untrusted::Input::from(cert_der))?;
-        let ca = crate::trust_anchor::anchor_from_trusted_mtc_cert(
-            &ca_cert_der,
-            CosignerPolicy::default(),
-            &[],
-            Vec::new(),
-            landmarks,
-        )?;
+        let ca = read_ca_cert(landmarks)?;
 
         assert!(ca.mtc_config.is_some());
 
@@ -293,8 +293,33 @@ mod tests {
             &cert,
             &ca.mtc_config.unwrap(),
             ca.subject_public_key_info.as_ref().into(),
-        )
-        .unwrap();
+            crate::ALL_VERIFICATION_ALGS,
+        )?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "aws-lc-rs")]
+    fn test_standalone_cert_verification() -> Result<(), Box<dyn core::error::Error>> {
+        // generated with the official MTC RFC demo, cert_10_3.pem
+        //   ./demo generate
+        //   openssl x509 -outform der -in cert_10_3.pem -out cert-standalone-simple.der
+        let cert_der = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/mtc/cert-standalone-simple.der"
+        ));
+        let cert = Cert::from_der(untrusted::Input::from(cert_der))?;
+
+        let ca_cert = read_ca_cert(Vec::new())?;
+
+        assert!(ca_cert.mtc_config.is_some());
+        verify_signature(
+            &cert,
+            &ca_cert.mtc_config.unwrap(),
+            ca_cert.subject_public_key_info.as_ref().into(),
+            crate::ALL_VERIFICATION_ALGS,
+        )?;
 
         Ok(())
     }

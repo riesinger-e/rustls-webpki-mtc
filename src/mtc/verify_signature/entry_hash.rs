@@ -12,12 +12,12 @@ pub(super) fn compute(
     hash_algorithm: HashAlgorithm,
     extensions: &MtcLogEntryExtensions<'_>,
     cert: &Cert<'_>,
-) -> Option<Hash> {
+) -> Result<Hash, Error> {
     match hash_algorithm {
         HashAlgorithm::Sha256 => {
             compute_entry_hash_inner::<sha2::Sha256, _>(extensions, cert).map(Hash::Sha256)
         }
-        _ => None,
+        _ => Err(Error::UnsupportedMtcHashAlgorithm),
     }
 }
 
@@ -25,7 +25,7 @@ pub(super) fn compute(
 fn compute_entry_hash_inner<H: Default + Update + FixedOutput, const HASH_SIZE: usize>(
     mtc_extensions: &MtcLogEntryExtensions<'_>,
     cert: &Cert<'_>,
-) -> Option<[u8; HASH_SIZE]>
+) -> Result<[u8; HASH_SIZE], Error>
 where
     OutputSize<H>: ArraySize<ArrayType<u8> = [u8; HASH_SIZE]>,
 {
@@ -66,8 +66,7 @@ where
             // we don't care about the public key itself
             reader.skip_to_end();
             Ok(algorithm)
-        })
-        .ok()?;
+        })?;
     hasher.update(&der::asn1_wrap(
         Tag::Sequence,
         spki_algorithm.as_slice_less_safe(),
@@ -90,5 +89,5 @@ where
     }
 
     // Step 11: finalize
-    Some(hasher.finalize_fixed().into())
+    Ok(hasher.finalize_fixed().into())
 }

@@ -69,13 +69,15 @@ allowed_external_types = [
 name = "webpki"
 
 [features]
-default = ["std", "mtc"]
+default = ["std"]
 alloc = ["ring?/alloc", "pki-types/alloc"]
 aws-lc-rs-unstable = ["aws-lc-rs"] # For backwards compatibility only
 aws-lc-rs = ["dep:aws-lc-rs", "aws-lc-rs/aws-lc-sys", "aws-lc-rs/prebuilt-nasm"]
 aws-lc-rs-fips = ["dep:aws-lc-rs", "aws-lc-rs/fips"]
 ring = ["dep:ring"]
 std = ["alloc", "pki-types/std"]
+# Support for Merkle Tree Certificates.
+# You probably also want to enable aws-lc-rs, as it's currently the only crypto provider supporting PQC algorithms.
 mtc = ["alloc", "pki-types/mtc", "dep:sha2"]
 
 [dependencies]

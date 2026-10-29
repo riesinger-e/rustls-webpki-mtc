@@ -1,5 +1,6 @@
 //! Inclusion proof evaluation
 
+use crate::Error;
 use crate::mtc::cert_format::MtcProof;
 use crate::mtc::cert_format::tls_vec::OpaqueVec;
 use pki_types::mtc::Hash;
@@ -10,12 +11,16 @@ use sha2::digest::common::OutputSize;
 
 /// Evaluate the inclusion proof. Returns the expected subtree hash.
 /// Follows the MTC RFC, section 4.3.2.
-pub(super) fn evaluate(mtc_proof: &MtcProof<'_>, index: u64, entry_hash: Hash) -> Option<Hash> {
+pub(super) fn evaluate(
+    mtc_proof: &MtcProof<'_>,
+    index: u64,
+    entry_hash: Hash,
+) -> Result<Hash, Error> {
     match entry_hash {
-        Hash::Sha256(val) => {
-            evaluate_inner::<sha2::Sha256, _>(mtc_proof, index, val).map(Hash::Sha256)
-        }
-        _ => None,
+        Hash::Sha256(val) => evaluate_inner::<sha2::Sha256, _>(mtc_proof, index, val)
+            .map(Hash::Sha256)
+            .ok_or(Error::MtcInvalidInclusionProof),
+        _ => Err(Error::UnsupportedMtcHashAlgorithm),
     }
 }
 
