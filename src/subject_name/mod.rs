@@ -363,8 +363,8 @@ impl fmt::Debug for IpAddrSlice<'_> {
             }
             16 => {
                 let (mut first, mut skipping) = (true, false);
-                for group in self.0.chunks_exact(2) {
-                    match (first, group == [0, 0], skipping) {
+                for group in self.0.as_chunks::<2>().0 {
+                    match (first, group == &[0, 0], skipping) {
                         (true, _, _) => first = false,
                         (false, false, false) => f.write_str(":")?,
                         (false, true, _) => {
