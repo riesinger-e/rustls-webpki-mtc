@@ -77,7 +77,7 @@ mod x509;
 pub(crate) mod test_utils;
 
 #[cfg(feature = "mtc")]
-pub mod mtc;
+pub(crate) mod mtc;
 
 pub use {
     cert::Cert,

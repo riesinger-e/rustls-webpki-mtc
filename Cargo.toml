@@ -27,6 +27,7 @@ include = [
     "Cargo.toml",
     "/LICENSE",
     "/README.md",
+    "src/mtc/**",
     "src/aws_lc_rs_algs.rs",
     "src/calendar.rs",
     "src/cert.rs",

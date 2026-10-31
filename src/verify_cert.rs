@@ -157,13 +157,32 @@ impl<'a, 'p: 'a, V: ExtendedKeyUsageValidator> ChainOptions<'a, 'p, V> {
         let mut spki_value = untrusted::Input::from(trust_anchor.subject_public_key_info.as_ref());
         let mut issuer_subject = untrusted::Input::from(trust_anchor.subject.as_ref());
         let mut issuer_key_usage = None; // TODO(XXX): Consider whether to track TrustAnchor KU.
+
+        #[cfg(feature = "mtc")]
+        let mut mtc_config = &trust_anchor.mtc_config;
+
         for path in path.iter() {
-            signed_data::verify_signed_data(
-                self.supported_sig_algs,
-                spki_value,
-                &path.cert.signed_data,
-                budget,
-            )?;
+            // if the MTC feature is enabled, verify MTC certificates correctly
+            cfg_select! {
+                feature = "mtc" => match mtc_config {
+                    Some(mtc_config) => {
+                        budget.consume_signature()?;
+                        crate::mtc::verify_signature(path.cert, mtc_config, spki_value, self.supported_sig_algs)
+                    }
+                    None => signed_data::verify_signed_data(
+                        self.supported_sig_algs,
+                        spki_value,
+                        &path.cert.signed_data,
+                        budget,
+                    )
+                }?,
+                _ => signed_data::verify_signed_data(
+                        self.supported_sig_algs,
+                        spki_value,
+                        &path.cert.signed_data,
+                        budget,
+                    )?
+            }
 
             if let Some(revocation_opts) = &self.revocation {
                 revocation_opts.check(
@@ -180,6 +199,11 @@ impl<'a, 'p: 'a, V: ExtendedKeyUsageValidator> ChainOptions<'a, 'p, V> {
             spki_value = path.cert.spki;
             issuer_subject = path.cert.subject;
             issuer_key_usage = path.cert.key_usage;
+
+            #[cfg(feature = "mtc")]
+            {
+                mtc_config = &path.cert.mtc_ca;
+            }
         }
 
         Ok(())
@@ -731,6 +755,7 @@ impl<'a> OidDecoder<'a> {
         }
     }
 
+    #[cfg(feature = "mtc")]
     pub(crate) fn new_relative(encoded: &'a [u8]) -> Self {
         Self {
             encoded,

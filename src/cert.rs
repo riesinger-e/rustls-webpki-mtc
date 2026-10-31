@@ -31,6 +31,7 @@ use pki_types::{CertificateDer, DnsName};
 
 /// A parsed X509 certificate.
 pub struct Cert<'a> {
+    #[cfg_attr(not(feature = "mtc"), expect(dead_code))]
     pub(crate) version: untrusted::Input<'a>,
     pub(crate) serial: untrusted::Input<'a>,
     pub(crate) signed_data: SignedData<'a>,

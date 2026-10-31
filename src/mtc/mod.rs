@@ -4,7 +4,8 @@ mod ca;
 mod cert_format;
 mod verify_signature;
 
-pub(crate) use ca::*;
+pub(crate) use ca::remember_mtc_extension;
+pub(crate) use verify_signature::verify_signature;
 
 use core::cmp::Ordering;
 
