@@ -126,4 +126,4 @@ enum_variant_marked_deprecated = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webpki_docsrs)'] }
 
 [patch.crates-io]
-rustls-pki-types = { git = "ssh://git@git.riesinger.xyz/masterarbeit/rustls-pki-types-mtc", branch = "mtc" }
+rustls-pki-types = { git = "https://github.com/riesinger-e/rustls-pki-types-mtc.git", branch = "mtc" }

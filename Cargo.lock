@@ -568,7 +568,7 @@ dependencies = [
 [[package]]
 name = "rustls-pki-types"
 version = "1.15.1"
-source = "git+ssh://git@git.riesinger.xyz/masterarbeit/rustls-pki-types-mtc?branch=mtc#1900d831b61d314ff27c0e9b7eea7bf37be58891"
+source = "git+https://github.com/riesinger-e/rustls-pki-types-mtc.git?branch=mtc#1900d831b61d314ff27c0e9b7eea7bf37be58891"
 dependencies = [
  "zeroize",
 ]
